@@ -118,6 +118,8 @@ public class UserRow
         int lvl = LevelSystem.countLvl(xp); // kallar på metoder och skickar in xp som argument som sparas värde i lvl
 
         Console.WriteLine($"{username} is level {lvl} with {xp} XP");
+
     }
+    string test;
 }
 
