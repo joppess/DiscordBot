@@ -120,6 +120,6 @@ public class UserRow
         Console.WriteLine($"{username} is level {lvl} with {xp} XP");
 
     }
-    string test;
+
 }
 
