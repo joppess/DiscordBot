@@ -656,11 +656,11 @@
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "C:\\DiscordBot\\DiscordBot\\DiscordBot.csproj",
+      "projectUniqueName": "C:\\DiscordBot\\DiscordBot.csproj",
       "projectName": "DiscordBot",
-      "projectPath": "C:\\DiscordBot\\DiscordBot\\DiscordBot.csproj",
+      "projectPath": "C:\\DiscordBot\\DiscordBot.csproj",
       "packagesPath": "C:\\Users\\johan\\.nuget\\packages\\",
-      "outputPath": "C:\\DiscordBot\\DiscordBot\\obj\\",
+      "outputPath": "C:\\DiscordBot\\obj\\",
       "projectStyle": "PackageReference",
       "fallbackFolders": [
         "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
