@@ -11,5 +11,6 @@ public class LevelSystem
             demandedXPForNextLvl *= 2; // för nästa nivå *2
         }
         return lvl;
+
     }
 }
