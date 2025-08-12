@@ -646,7 +646,8 @@
   },
   "projectFileDependencyGroups": {
     "net9.0": [
-      "Discord.Net >= 3.18.0"
+      "Discord.Net >= 3.18.0",
+      "Discord.Net.WebSocket >= 3.18.0"
     ]
   },
   "packageFolders": {
@@ -700,6 +701,10 @@
         "targetAlias": "net9.0",
         "dependencies": {
           "Discord.Net": {
+            "target": "Package",
+            "version": "[3.18.0, )"
+          },
+          "Discord.Net.WebSocket": {
             "target": "Package",
             "version": "[3.18.0, )"
           }

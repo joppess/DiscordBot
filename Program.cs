@@ -7,7 +7,8 @@ using System.Xml.Serialization;
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
-
+using System.Net.Http;
+using System.Net.Http.Json;
 internal class Program
 {
     static async Task Main(string[] args)
@@ -49,6 +50,8 @@ internal class Program
 }
 public class UserRow
 {
+    private static readonly HttpClient http = new HttpClient(); // HttpClient typen (klassen) som sköter HTTP-anrop (GET/POST osv)
+
     // user.json är filnamnet vi ska spara/läsa ifrån
     string DataFile = "users.json";
 
@@ -134,75 +137,132 @@ public class UserRow
     public async Task MessageReceivedAsync(SocketMessage message) // parametern handlar om allt om meddelandet som skickades(text, avsändarem, kanal)
     {
         if (message.Author.IsBot) return; // ge ej xp till andra bottar
-        if (message is not SocketUserMessage m) return; // är medd ej från en anv så avbryt
+        if (message is not SocketUserMessage m) return; // Om message inte är en SocketUserMessage → return
         if (m.Source != MessageSource.User) return; // säkerställer att medd är från en anv..
         if (m.Channel is not Discord.WebSocket.SocketTextChannel) return; // låt bara medd i serverns textnakaler gå vidare
 
-        if (message.Content.Equals("!test", StringComparison.OrdinalIgnoreCase))
+        // m är en lokal variabel av typen SocketUserMessage.
+        if (m.Content.StartsWith("!meme", StringComparison.OrdinalIgnoreCase))
         {
-            await message.Channel.SendMessageAsync("Test: jag är här 👋");
-            return;
-        }
-        // message.Author = avsändaren av meddelandet
-        // .Id = deras unika ID av typen ulong
-        ulong userId = message.Author.Id; // hämtar unika DC-ID:t för användare som skrev meddelandet
-        string? username = message.Author.Username; // Hämtar användarens synliga namn i DC
-        System.Console.WriteLine($" {userId}, {username}");
-
-        // FÖRE: hämta nuvarande data och level innan vi ökar XP
-        users.TryGetValue(userId, out var ud);           // null om ny
-        int prevXp = ud?.Xp ?? 0;
-        int prevLvl = LevelSystem.countLvl(prevXp);
-
-        Username = message.Author.Username; // sparar användarens Dc-namn i UserData
-
-        if (users.ContainsKey(userId))
-        {
-            users[userId].Xp += 1; // lägg til 1 till den xp som redan finns
-        }
-        else // existerar inte användaren i dictionarien
-        {
-            users[userId] = new UserData // ersätt/lägg till värdet i dict med nyckeln (suerId) skapa nytt tomt användarobjekt
+            try
             {
-                // fyller i värden direkt
-                Username = username,
-                Xp = 1
-            }; // klar med användares data, sätter in det i dict
-        }
-        int xp = users[userId].Xp; // users[userId] - slår upp användaren i dict //.Xp plockar ut egenskapen xp // allt spar i en variabel
-        int lvl = LevelSystem.countLvl(xp); // kallar på metoder och skickar in xp som argument som sparas värde i lvl
+                // en array av strängar där "parts" är variabeln som behåller arrayen
+                // Split returnerar flera bitar och då för att spara flera värden behöver vi en array
+                // ' ' = dela på mellanslag // 2 = max 2 delar
+                //StringSplitOptions.RemoveEmptyEntries tar bort tomma delar (whitespaces)
+                string[] parts = m.Content.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+                // sträng får vara null 
+                // om vi har mer än ett ord efter vi delat upp medd(split) så ta detta värde: (parts[1])
+                // om inte ta detta värde (null) alltså ingen subreddit angavs.
+                string? subreddit = parts.Length > 1 ? parts[1] : null;
+                // om ingen subreddit angavs(subreddit == null) är variabeln null
+                // om sant använd grund-URL(vänster om :)
+                // om falskt bygg en URL som inkluderar subredditen(höger om :)
+                // EscapeDataString kodar mellanslag så serven inte tolkar länken fel( tex: dank memes" → "dank%20memes" (mellanslag blir %20))
+                string apiUrl = subreddit == null ? "https://meme-api.com/gimme" : $"https://meme-api.com/gimme/{Uri.EscapeDataString(subreddit)}";
+
+                // http är en variabel av HttpClient
+                var resp = await http.GetAsync(apiUrl);
+
+                if (!resp.IsSuccessStatusCode) // svaret inte är lyckat så gör nedan
+                {
+                    await m.Channel.SendMessageAsync("Kunde inte hämta en meme just nu 🙈");
+                    resp.Dispose(); //städar upp nätverksresurser (kom ihåg att stänga och släppa resurser när du är klar)
+                    return;
+                }
+                string json = await resp.Content.ReadAsStringAsync(); // läser hela svaret som text(json)
+                resp.Dispose();
+
+                // JsonDocument.Parse skickar in argumentet json (vår text) den försöker tolka texten som JSON och bygger objektet/variabeln "doc"
+                // using = städar upp autmatiskt när blocket slutar
+                // JsonDocument läser JSON-texten till ett objekt.
+                // RootElement ger dig själva json-trädet
+                // doc.RootElement - Det översta elementet i den JSON som nyss parsades. Tänk: JSON är ett träd; roten är det allra översta { ... } eller [ ... ]
+                using (JsonDocument doc = JsonDocument.Parse(json))
+                {
+                    JsonElement root = doc.RootElement;
+                }
+                ///
+                /// 
+                /// 
+                /// 
+                /// 
+                /// 
+                /// 
+                /// 
+                /// 
+                /// 
+                /// 
+                /// 
+                /// 
+                if (message.Content.Equals("!test", StringComparison.OrdinalIgnoreCase))
+                {
+                    await message.Channel.SendMessageAsync("Test: jag är här 👋");
+                    return;
+                }
+                // message.Author = avsändaren av meddelandet
+                // .Id = deras unika ID av typen ulong
+                ulong userId = message.Author.Id; // hämtar unika DC-ID:t för användare som skrev meddelandet
+                string? username = message.Author.Username; // Hämtar användarens synliga namn i DC
+                System.Console.WriteLine($" {userId}, {username}");
+
+                // FÖRE: hämta nuvarande data och level innan vi ökar XP
+                users.TryGetValue(userId, out var ud);           // null om ny
+                int prevXp = ud?.Xp ?? 0;
+                int prevLvl = LevelSystem.countLvl(prevXp);
+
+                Username = message.Author.Username; // sparar användarens Dc-namn i UserData
+
+                if (users.ContainsKey(userId))
+                {
+                    users[userId].Xp += 4; // lägg til 2 till den xp som redan finns
+                }
+                else // existerar inte användaren i dictionarien
+                {
+                    users[userId] = new UserData // ersätt/lägg till värdet i dict med nyckeln (suerId) skapa nytt tomt användarobjekt
+                    {
+                        // fyller i värden direkt
+                        Username = username,
+                        Xp = 4
+                    }; // klar med användares data, sätter in det i dict
+                }
+                int xp = users[userId].Xp; // users[userId] - slår upp användaren i dict //.Xp plockar ut egenskapen xp // allt spar i en variabel
+                int lvl = LevelSystem.countLvl(xp); // kallar på metoder och skickar in xp som argument som sparas värde i lvl
 
 
-        // ÖKA XP // ud syftar till userdata
-        if (ud != null)  // är ud inte null så finns anv i dict:en
-        {
-            ud.Xp += 1; // ökar värdet i ud med 1
-            if (ud.Username != username)
-                // om UserName inte är null så blir ud.UserName username
-                ud.Username = username ?? string.Empty; // om ud.Username är null ta höger (bli tom sträng)
-        }
-        else
-        {
-            // anv fanns ej skapa ny post 
-            // users[userId] stoppar samman objekt i dict:en
-            // både ud och users[userId] pekar på samma UserData, med Xp = 1
-            users[userId] = ud = new UserData { Username = username ?? string.Empty, Xp = 1 };
-        }
+                // ÖKA XP // ud syftar till userdata
+                if (ud != null)  // är ud inte null så finns anv i dict:en
+                {
+                    ud.Xp += 4; // ökar värdet i ud med 1
+                    if (ud.Username != username)
+                        // om UserName inte är null så blir ud.UserName username
+                        ud.Username = username ?? string.Empty; // om ud.Username är null ta höger (bli tom sträng)
+                }
+                else
+                {
+                    // anv fanns ej skapa ny post 
+                    // users[userId] stoppar samman objekt i dict:en
+                    // både ud och users[userId] pekar på samma UserData, med Xp = 1
+                    users[userId] = ud = new UserData { Username = username ?? string.Empty, Xp = 2 };
+                }
 
-        // EFTER: räkna ny level
-        int currXp = ud.Xp; //  kopierar nuvarande XP (värdetyp) till currXp
-        int currLvl = LevelSystem.countLvl(currXp); // beräknar ny lvl baserat på ny xp
+                // EFTER: räkna ny level
+                int currXp = ud.Xp; //  kopierar nuvarande XP (värdetyp) till currXp
+                int currLvl = LevelSystem.countLvl(currXp); // beräknar ny lvl baserat på ny xp
 
-        // Skriv bara när level ökat
-        if (currLvl > prevLvl)
-        {
-            await message.Channel.SendMessageAsync($"{username} har nått level {currLvl}! 🎉");
-        }
+                // Skriv bara när level ökat
+                if (currLvl > prevLvl)
+                {
+                    await message.Channel.SendMessageAsync($"{username} har nått level {currLvl}! 🎉");
+                }
 
-        Console.WriteLine($"{username} xp {prevXp}->{currXp}, lvl {prevLvl}->{currLvl}");
+                Console.WriteLine($"{username} xp {prevXp}->{currXp}, lvl {prevLvl}->{currLvl}");
 
-    }
+            }
+
 
 }
+
+
 
 
