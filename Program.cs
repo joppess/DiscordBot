@@ -9,6 +9,7 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using System.Net.Http;
 using System.Net.Http.Json;
+using System.ComponentModel.Design.Serialization;
 internal class Program
 {
     static async Task Main(string[] args)
@@ -141,6 +142,67 @@ public class UserRow
         if (m.Source != MessageSource.User) return; // säkerställer att medd är från en anv..
         if (m.Channel is not Discord.WebSocket.SocketTextChannel) return; // låt bara medd i serverns textnakaler gå vidare
 
+        if (m.Content.StartsWith("!weather", StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                // delar upp texten som anv skriver
+                // m.Content är medd som anv skrev
+                // texten delas upp vid varje mellanslag
+                // StringSplitOptions.RemoveEmptyEntries tar bort whitespaces
+                // resultatet sparas i en array som heter parts
+                string[] words = m.Content.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                string city = "Borlänge";
+                // finns det mer än 1 ord (kommando) i arrayen så sätt city till det andra ordet (kommandot)
+                if (words.Length > 1)
+                {
+                    city = words[1];
+                }
+
+                // {Uri.EscapeDataString(city)} ser till att staden är korrekt kodad för webben.
+                // count=1 betdyer att vi bara vill ha ett resultat 
+                string geoUrl = $"https://geocoding-api.open-meteo.com/v1/search?name={Uri.EscapeDataString(city)}&count=1&language=sv&format=json";
+                // skickar GET-anrop
+                var geoResp = await http.GetAsync(geoUrl);
+                if (!geoResp.IsSuccessStatusCode)
+                {
+                    await m.Channel.SendMessageAsync("Kunde inte slå upp orten just nu 🙈");
+                    geoResp.Dispose();
+                    return;
+                }
+                // geoResp.Content är datainnehållet från api-svaret
+                string geoJson = await geoResp.Content.ReadAsStringAsync();
+                geoResp.Dispose(); // tar bort de vi inte längre behöver från RAM
+                double lat, lon;
+                string geoName;
+                // using stänger obj auto så vi slipper minnesproblem
+                // gdoc innehåler nu hela svaret som ett JSON-träd där vi kan hämta värden genom att gå till rätt gren (t.ex. results[0].latitude)
+                using (JsonDocument gdoc = JsonDocument.Parse(geoJson)) // läser json texten och gör den till objekt vi kan bläddra i
+                {
+                    var root = gdoc.RootElement; // tar fram rooten ur json-trädet
+                                                 // försök hitta fältet "results" och lägg det i variabeln results. Hittas det returnera true annars false
+                                                 // Eller om results finns men är en tom lista så skicka felmedd
+                    if (!root.TryGetProperty("results", out var results) || results.GetArrayLength() == 0)
+                    {
+                        await m.Channel.SendMessageAsync($"Hittade ingen ort som matchar **{city}** 😕");
+                        return;
+                    }
+                    var r0 = results[0]; // vi tar det första obj [0] i arrayen eftersom API sorterar bästa träffen först
+                    lat = r0.GetProperty("latitude").GetDouble(); // går in i obj och hämtar värdet latitude
+                    lon = r0.GetProperty("longitude").GetDouble(); // GetDouble() gör om värdet till ett decimal/flyttal
+
+                    // finns fältet name i json-obj r0 så lägg det i varibalen n 
+                    // stämmer det så står före ?
+                    // ja - det som står mellan ? och : körs om testet är sant
+                    // nej - det som står efter : körs om testet är falskt
+                    // och ?? kolla om värdet är null // ja - anv värdet efter ?? // nej det finns ett värde. anv det (det som nGetString returnerar)
+                    string name = r0.TryGetProperty("name", out var n) ? (n.GetString() ?? city) : city;
+                }
+
+
+            }
+        }
+
         // m är en lokal variabel av typen SocketUserMessage.
         if (m.Content.StartsWith("!meme", StringComparison.OrdinalIgnoreCase))
         {
@@ -181,20 +243,51 @@ public class UserRow
                 using (JsonDocument doc = JsonDocument.Parse(json))
                 {
                     JsonElement root = doc.RootElement;
+
+                    // root =  roten i JSON-svaret (t.ex. { "url": "...", "title": "...", "postLink":
+                    //  GetProperty hämtar fältet url. vid fel kastas Exception
+                    // GetString() gör om JSON-värdet till en sträng. obs kan bli null om värdet ej är en sträng
+                    // ?? = om vänster sida blev null använd tom sträng (så inte imageUrl blir null)
+                    string imageUrl = root.GetProperty("url").GetString() ?? "";
+                    // gör en förenklad version på denna
+                    string title;
+                    // out är en behållare som ger tillbaka ett värde via en varibel som skickas in i metoden. 
+                    // returnerar true/false pga TryGetProperty
+                    // Metoden letar efter ett fält som heter "title" i root.
+                    // Hittas det → metoden returnerar true och lägger värdet i burken t.
+                    // Hittas det inte → metoden returnerar false och t blir ett default-värde (inget du ska använda).
+
+                    if (root.TryGetProperty("title", out JsonElement t))
+                    {
+                        title = t.GetString() ?? "Meme";
+                    }
+                    else
+                    {
+                        title = "Meme";
+                    }
+                    // TryGetProperty försöker hämta egenskapen
+                    // ? A : B = A körs om det blev true, annars körs B
+                    // om det blev null, använd tom string
+                    // ta postLink från JSON om det finns, annars använd tom sträng”, och out p är bara behållaren där TryGetProperty lägger hittat värde.
+                    string postLink = root.TryGetProperty("postlink", out JsonElement p) ? (p.GetString() ?? "") : "";
+
+                    if (String.IsNullOrWhiteSpace(imageUrl))
+                    {
+                        // m.Channel = kanalen där användaren skrev.
+                        await m.Channel.SendMessageAsync("Jag hittade ingen bild i svaret 😕");
+                        return;
+                    }
+                    if (!string.IsNullOrWhiteSpace(postLink))
+                    {
+                        await m.Channel.SendMessageAsync($"{title}\n{postLink}\n{imageUrl}");
+                    }
+                    else
+                    {
+                        await m.Channel.SendMessageAsync($"{title}\n{imageUrl}");
+                    }
                 }
-                ///
-                /// 
-                /// 
-                /// 
-                /// 
-                /// 
-                /// 
-                /// 
-                /// 
-                /// 
-                /// 
-                /// 
-                /// 
+
+
                 if (message.Content.Equals("!test", StringComparison.OrdinalIgnoreCase))
                 {
                     await message.Channel.SendMessageAsync("Test: jag är här 👋");
@@ -259,8 +352,17 @@ public class UserRow
                 Console.WriteLine($"{username} xp {prevXp}->{currXp}, lvl {prevLvl}->{currLvl}");
 
             }
+            catch (Exception ex)
+            {
+                System.Console.WriteLine($"[MEME] Error: {ex.Message}");
+                await m.Channel.SendMessageAsync("Något gick fel när jag hämtade memen 😬");
+                return;
+
+            }
 
 
+        }
+    }
 }
 
 
