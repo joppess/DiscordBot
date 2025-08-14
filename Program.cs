@@ -335,6 +335,7 @@ public class UserRow
                                 }
                             }
                             bool isDay = true;
+                            string summary = WxDesc(wxCode, isDay);
 
                         }
                     }
