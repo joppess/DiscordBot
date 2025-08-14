@@ -197,6 +197,147 @@ public class UserRow
                     // nej - det som står efter : körs om testet är falskt
                     // och ?? kolla om värdet är null // ja - anv värdet efter ?? // nej det finns ett värde. anv det (det som nGetString returnerar)
                     string name = r0.TryGetProperty("name", out var n) ? (n.GetString() ?? city) : city;
+
+                    string admin = "";
+                    // kollar om json-obj r0 har ett fält som heter admin1 och isf lägger värdet i variable a
+                    if (r0.TryGetProperty("admin1", out var a))
+                    {
+                        string? temp = a.GetString(); // försöker hämta texten från a och sparar den i en tillf variabel
+                        if (temp != null) // innehåller temp nåt så spara vi det i admin
+                        {
+                            admin = temp;
+                        }
+                    }
+                    string country = "";
+                    if (r0.TryGetProperty("country", out var c))
+                    {
+                        string? temp = c.GetString();
+                        if (temp != null)
+                        {
+                            country = temp;
+                        }
+                    }
+                    geoName = string.IsNullOrWhiteSpace(admin) ? $"{name}, {country}" : $"{name}, {admin}, {country}";
+
+                    string meteoUrl = $"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}" +
+                    $"&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,weather_code,wind_speed_10m" +
+                    $"&hourly=precipitation_probability&timezone=auto";
+
+                    var wxResp = await http.GetAsync(meteoUrl); // skicka get förfrågan till länken ovan
+                    if (!wxResp.IsSuccessStatusCode)
+                    {
+                        await m.Channel.SendMessageAsync("Kunde inte hämta vädret just nu 🌧️");
+                        wxResp.Dispose();
+                        return;
+                    }
+                    // wxResp.Content = själva innehållet från API svaret
+                    string wxJson = await wxResp.Content.ReadAsStringAsync();
+                    wxResp.Dispose();
+                    double temp, feels, wind, rain;
+                    int wxCode;
+                    int calcNextHour = -1; // -1 anv som inget värde tills vi räknat ut något
+                    string localTime = "";
+                    // vi tar hela väder-svaret wxJson (som är en text) och gör den till JSON-obj
+                    using (JsonDocument wdoc = JsonDocument.Parse(wxJson))
+                    {
+                        var wxroot = wdoc.RootElement;
+                        var current = wxroot.GetProperty("current"); // hämtar current från JSON
+                        temp = current.GetProperty("temperature_2m").GetDouble(); // gör om värdet till decimal
+                        feels = current.GetProperty("apparent_temperature").GetDouble();
+                        wind = current.GetProperty("wind_speed_10m").GetDouble();
+                        rain = current.GetProperty("precipitation").GetDouble();
+                        // .GetInt32 gör om det till heltal
+                        wxCode = current.GetProperty("weather_code").GetInt32(); // hämtar en siffra som motsvarar vädret (tex 0 = klart)
+                        localTime = current.TryGetProperty("time", out var t) ? (t.GetString() ?? "") : "";
+
+                        // plocka sannolikhet för nederbör nästa timme, om möjligt
+                        // times = listan med alla tider (t.ex. "2025-08-13T10:00", "2025-08-13T11:00", osv)
+                        // pops = listan med alla nederbördssannolikheter (t.ex. 20, 45, 80 procent)
+                        if (wxroot.TryGetProperty("hourly", out var hourly) &&
+                            hourly.TryGetProperty("time", out var times) && // Från "hourly"-objektet, försök hitta "time"
+                            hourly.TryGetProperty("precipitation_probability", out var pops) &&
+                            times.ValueKind == JsonValueKind.Array && // Kolla att "time" faktiskt är en lista (array) och inte t.ex. en sträng.
+                            pops.ValueKind == JsonValueKind.Array &&
+                            times.GetArrayLength() == pops.GetArrayLength() && // Säkerställ att det finns lika många tider som procentsatser,annars vet vi inte vilket värde som hör till vilken tid.
+                            !string.IsNullOrEmpty(localTime)) // Kolla att vi faktiskt har en giltig localTime (annars vet vi inte vilken tid som är nu)
+                        {
+                            int index = -1; // Vi sätter den till -1 först som en signal: “Vi har inte hittat nuvarande tid ännu”.
+                            for (int i = 0; i > times.GetArrayLength(); i++) // loopar igenom alla tider i listan. funktionen ger hur många tider som finns i listan
+                            {
+                                // Loopen letar igenom hela listan med timvärden och hittar vilken plats som är “just nu”. Vi sparar platsen i index så vi vet var i listan vi är och kan titta på nästa timmes data.
+                                // times[i] är tiden vid position i i listan
+                                // .GetString är null använd tom sträng
+                                // jämför tiden med localTime (som vi tidigare hämtade från"current" i JSON)
+                                if ((times[i].GetString() ?? "") == localTime)
+                                {
+                                    index = i; // om vi hittar en matching sparar vi indexet (i) i variabeln
+                                    break; // hoppa ut ur loop
+                                }
+                            }
+                            // idx + 1 < pops.GetArrayLength() betyder att det finns en “nästa timme” efter nuvarande i listan pops
+                            if (index >= 0 && index + 1 < pops.GetArrayLength())
+                            {
+                                calcNextHour = pops[index + 1].GetInt32(); // .GetInt32 gär om det från JSON till ett heltal
+                            }
+                            else if (index >= 0)
+                            {
+                                calcNextHour = pops[index].GetInt32(); // här tar vi sannolikheten för nederbörd vid nuvarnade tidpunkt
+                            }
+
+                            string WxDesc(int c, bool day)
+                            {
+                                switch (c)
+                                {
+                                    case 0:
+                                        return day ? "Klar himmel ☀️" : "Klar himmel 🌙";
+                                    case 1:
+                                    case 2:
+                                        return day ? "Mest klart 🌤️" : "Mest klart ☁️";
+                                    case 3:
+                                        return "Mulet ☁️";
+                                    case 45:
+                                    case 48:
+                                        return "Dimma 🌫️";
+                                    case 51:
+                                    case 53:
+                                    case 55:
+                                        return "Duggregn 🌦️";
+                                    case 56:
+                                    case 57:
+                                        return "Isduggregn 🧊🌧️";
+                                    case 61:
+                                    case 63:
+                                    case 65:
+                                        return "Regn 🌧️";
+                                    case 66:
+                                    case 67:
+                                        return "Isregn 🧊🌧️";
+                                    case 71:
+                                    case 73:
+                                    case 75:
+                                        return "Snöfall ❄️";
+                                    case 77:
+                                        return "Snökorn ❄️";
+                                    case 80:
+                                    case 81:
+                                    case 82:
+                                        return "Skurar 🌦️";
+                                    case 85:
+                                    case 86:
+                                        return "Snöbyar 🌨️";
+                                    case 95:
+                                        return "Åska ⛈️";
+                                    case 96:
+                                    case 99:
+                                        return "Åska med hagel ⛈️";
+                                    default:
+                                        return "Vädersymbol saknas";
+                                }
+                            }
+                            bool isDay = true;
+
+                        }
+                    }
                 }
 
 
