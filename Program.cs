@@ -10,6 +10,7 @@ using System.Threading.Tasks;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.ComponentModel.Design.Serialization;
+using System.Globalization;
 internal class Program
 {
     static async Task Main(string[] args)
@@ -202,34 +203,53 @@ public class UserRow
                     // kollar om json-obj r0 har ett fält som heter admin1 och isf lägger värdet i variable a
                     if (r0.TryGetProperty("admin1", out var a))
                     {
-                        string? temp = a.GetString(); // försöker hämta texten från a och sparar den i en tillf variabel
-                        if (temp != null) // innehåller temp nåt så spara vi det i admin
+                        string? adminTemp = a.GetString(); // försöker hämta texten från a och sparar den i en tillf variabel
+                        if (adminTemp != null) // innehåller temp nåt så spara vi det i admin
                         {
-                            admin = temp;
+                            admin = adminTemp;
                         }
                     }
                     string country = "";
                     if (r0.TryGetProperty("country", out var c))
                     {
-                        string? temp = c.GetString();
-                        if (temp != null)
+                        string? countryTemp = c.GetString();
+                        if (countryTemp != null)
                         {
-                            country = temp;
+                            country = countryTemp;
                         }
                     }
                     geoName = string.IsNullOrWhiteSpace(admin) ? $"{name}, {country}" : $"{name}, {admin}, {country}";
 
-                    string meteoUrl = $"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}" +
-                    $"&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,weather_code,wind_speed_10m" +
-                    $"&hourly=precipitation_probability&timezone=auto";
+                    var latStr = lat.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                    var lonStr = lon.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+                    string meteoUrl =
+                        $"https://api.open-meteo.com/v1/forecast?latitude={latStr}&longitude={lonStr}" +
+                        $"&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,weather_code,wind_speed_10m" +
+                        $"&hourly=precipitation_probability&timezone=auto";
+
+
 
                     var wxResp = await http.GetAsync(meteoUrl); // skicka get förfrågan till länken ovan
+
+                    Console.WriteLine("[DEBUG] Meteo URL: " + meteoUrl);
+                    Console.WriteLine("[DEBUG] Status: " + (int)wxResp.StatusCode + " " + wxResp.StatusCode);
+
+
+
+
+
                     if (!wxResp.IsSuccessStatusCode)
                     {
                         await m.Channel.SendMessageAsync("Kunde inte hämta vädret just nu 🌧️");
                         wxResp.Dispose();
                         return;
                     }
+
+
+
+
+
                     // wxResp.Content = själva innehållet från API svaret
                     string wxJson = await wxResp.Content.ReadAsStringAsync();
                     wxResp.Dispose();
@@ -250,6 +270,17 @@ public class UserRow
                         wxCode = current.GetProperty("weather_code").GetInt32(); // hämtar en siffra som motsvarar vädret (tex 0 = klart)
                         localTime = current.TryGetProperty("time", out var t) ? (t.GetString() ?? "") : "";
 
+
+
+
+
+
+
+
+
+
+
+
                         // plocka sannolikhet för nederbör nästa timme, om möjligt
                         // times = listan med alla tider (t.ex. "2025-08-13T10:00", "2025-08-13T11:00", osv)
                         // pops = listan med alla nederbördssannolikheter (t.ex. 20, 45, 80 procent)
@@ -262,7 +293,7 @@ public class UserRow
                             !string.IsNullOrEmpty(localTime)) // Kolla att vi faktiskt har en giltig localTime (annars vet vi inte vilken tid som är nu)
                         {
                             int index = -1; // Vi sätter den till -1 först som en signal: “Vi har inte hittat nuvarande tid ännu”.
-                            for (int i = 0; i > times.GetArrayLength(); i++) // loopar igenom alla tider i listan. funktionen ger hur många tider som finns i listan
+                            for (int i = 0; i < times.GetArrayLength(); i++) // loopar igenom alla tider i listan. funktionen ger hur många tider som finns i listan
                             {
                                 // Loopen letar igenom hela listan med timvärden och hittar vilken plats som är “just nu”. Vi sparar platsen i index så vi vet var i listan vi är och kan titta på nästa timmes data.
                                 // times[i] är tiden vid position i i listan
@@ -337,12 +368,24 @@ public class UserRow
                             bool isDay = true;
                             string summary = WxDesc(wxCode, isDay);
 
+                            string popTxt = calcNextHour >= 0 ? $"\n Nederbördssannolikhet nästa timme: {calcNextHour}%." : "";
+                            await m.Channel.SendMessageAsync($"**Väder för {geoName}**\n" +
+                            $"{summary}\n" +
+                            $"Temp: {temp:0.#}°C (känns som {feels:0.#}°C)\n" +
+                            $"Vind: {wind:0.#} m/s · Nederbörd: {rain:0.#} mm{popTxt}");
                         }
+
                     }
                 }
 
 
             }
+            catch (Exception ex)
+            {
+                System.Console.WriteLine($"[WEATHER] Error: {ex.Message}");
+                await m.Channel.SendMessageAsync("Något gick fel när jag hämtade vädret 😬");
+            }
+            return; // avsluta så vi inte faller vidare i annan logik
         }
 
         // m är en lokal variabel av typen SocketUserMessage.
