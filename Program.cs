@@ -41,6 +41,14 @@ internal class Program
         await client.StartAsync(); // Startar gateway-anslutning
 
         System.Console.WriteLine("Botten lever");
+
+        // Hooka in när programmet stängs av
+        AppDomain.CurrentDomain.ProcessExit += (sender, e) =>
+        {
+            userRow.SaveData();
+            Console.WriteLine("[SAVE] Data sparad vid avslut");
+        };
+
         await Task.Delay(-1); // håller programmet igång
     }
     // Definerar event-hanteraren för loggar
@@ -366,7 +374,16 @@ public class UserRow
                                 }
                             }
                             bool isDay = true;
+                            if (current.TryGetProperty("is_day", out var isDayEl))
+                            {
+                                if (isDayEl.ValueKind == JsonValueKind.Number) isDay = isDayEl.GetInt32() == 1;
+                                else if (isDayEl.ValueKind == JsonValueKind.True) isDay = true;
+                                else if (isDayEl.ValueKind == JsonValueKind.False) isDay = false;
+                            }
+
+
                             string summary = WxDesc(wxCode, isDay);
+
 
                             string popTxt = calcNextHour >= 0 ? $"\n Nederbördssannolikhet nästa timme: {calcNextHour}%." : "";
                             await m.Channel.SendMessageAsync($"**Väder för {geoName}**\n" +
@@ -471,71 +488,6 @@ public class UserRow
                         await m.Channel.SendMessageAsync($"{title}\n{imageUrl}");
                     }
                 }
-
-
-                if (message.Content.Equals("!test", StringComparison.OrdinalIgnoreCase))
-                {
-                    await message.Channel.SendMessageAsync("Test: jag är här 👋");
-                    return;
-                }
-                // message.Author = avsändaren av meddelandet
-                // .Id = deras unika ID av typen ulong
-                ulong userId = message.Author.Id; // hämtar unika DC-ID:t för användare som skrev meddelandet
-                string? username = message.Author.Username; // Hämtar användarens synliga namn i DC
-                System.Console.WriteLine($" {userId}, {username}");
-
-                // FÖRE: hämta nuvarande data och level innan vi ökar XP
-                users.TryGetValue(userId, out var ud);           // null om ny
-                int prevXp = ud?.Xp ?? 0;
-                int prevLvl = LevelSystem.countLvl(prevXp);
-
-                Username = message.Author.Username; // sparar användarens Dc-namn i UserData
-
-                if (users.ContainsKey(userId))
-                {
-                    users[userId].Xp += 4; // lägg til 2 till den xp som redan finns
-                }
-                else // existerar inte användaren i dictionarien
-                {
-                    users[userId] = new UserData // ersätt/lägg till värdet i dict med nyckeln (suerId) skapa nytt tomt användarobjekt
-                    {
-                        // fyller i värden direkt
-                        Username = username,
-                        Xp = 4
-                    }; // klar med användares data, sätter in det i dict
-                }
-                int xp = users[userId].Xp; // users[userId] - slår upp användaren i dict //.Xp plockar ut egenskapen xp // allt spar i en variabel
-                int lvl = LevelSystem.countLvl(xp); // kallar på metoder och skickar in xp som argument som sparas värde i lvl
-
-
-                // ÖKA XP // ud syftar till userdata
-                if (ud != null)  // är ud inte null så finns anv i dict:en
-                {
-                    ud.Xp += 4; // ökar värdet i ud med 1
-                    if (ud.Username != username)
-                        // om UserName inte är null så blir ud.UserName username
-                        ud.Username = username ?? string.Empty; // om ud.Username är null ta höger (bli tom sträng)
-                }
-                else
-                {
-                    // anv fanns ej skapa ny post 
-                    // users[userId] stoppar samman objekt i dict:en
-                    // både ud och users[userId] pekar på samma UserData, med Xp = 1
-                    users[userId] = ud = new UserData { Username = username ?? string.Empty, Xp = 2 };
-                }
-
-                // EFTER: räkna ny level
-                int currXp = ud.Xp; //  kopierar nuvarande XP (värdetyp) till currXp
-                int currLvl = LevelSystem.countLvl(currXp); // beräknar ny lvl baserat på ny xp
-
-                // Skriv bara när level ökat
-                if (currLvl > prevLvl)
-                {
-                    await message.Channel.SendMessageAsync($"{username} har nått level {currLvl}! 🎉");
-                }
-
-                Console.WriteLine($"{username} xp {prevXp}->{currXp}, lvl {prevLvl}->{currLvl}");
-
             }
             catch (Exception ex)
             {
@@ -544,11 +496,104 @@ public class UserRow
                 return;
 
             }
+        }
 
+        if (message.Content.Equals("!test", StringComparison.OrdinalIgnoreCase))
+        {
+            await message.Channel.SendMessageAsync("Test: jag är här 👋");
+            return;
+        }
+
+        if (message.Content.Equals("!help", StringComparison.OrdinalIgnoreCase))
+        {
+            await message.Channel.SendMessageAsync(
+        "📸 **!meme** = visar memes (ofc)\n" +
+        "🧪 **!test** = testa så jag är här\n" +
+        "🌦️ **!weather** = kolla vädret\n" +
+        "🌦️🏙️ **!weather + stad** = kolla vädret för just den staden\n" +
+        "🏓 **!ping** = pong (och vice varsa)");
+            return;
+        }
+
+        if (m.Content.Equals("!ping", StringComparison.OrdinalIgnoreCase))
+        {
+            await m.Channel.SendMessageAsync("Pong! 🏓");
+            return;
+        }
+        else if (m.Content.Equals("!pong", StringComparison.OrdinalIgnoreCase))
+        {
+            await m.Channel.SendMessageAsync("Ping! 🏓");
+            return;
 
         }
+
+        // message.Author = avsändaren av meddelandet
+        // .Id = deras unika ID av typen ulong
+        ulong userId = message.Author.Id; // hämtar unika DC-ID:t för användare som skrev meddelandet
+        string? username = message.Author.Username; // Hämtar användarens synliga namn i DC
+        System.Console.WriteLine($" {userId}, {username}");
+
+        // FÖRE: hämta nuvarande data och level innan vi ökar XP
+        users.TryGetValue(userId, out var ud);           // null om ny
+        int prevXp = ud?.Xp ?? 0;
+        int prevLvl = LevelSystem.countLvl(prevXp);
+
+        Username = message.Author.Username; // sparar användarens Dc-namn i UserData
+
+        if (users.ContainsKey(userId))
+        {
+            users[userId].Xp += 4; // lägg til 2 till den xp som redan finns
+        }
+        else // existerar inte användaren i dictionarien
+        {
+            users[userId] = new UserData // ersätt/lägg till värdet i dict med nyckeln (suerId) skapa nytt tomt användarobjekt
+            {
+                // fyller i värden direkt
+                Username = username,
+                Xp = 4
+            }; // klar med användares data, sätter in det i dict
+        }
+        int xp = users[userId].Xp; // users[userId] - slår upp användaren i dict //.Xp plockar ut egenskapen xp // allt spar i en variabel
+        int lvl = LevelSystem.countLvl(xp); // kallar på metoder och skickar in xp som argument som sparas värde i lvl
+
+
+        // ÖKA XP // ud syftar till userdata
+        if (ud != null)  // är ud inte null så finns anv i dict:en
+        {
+            ud.Xp += 4; // ökar värdet i ud med 1
+            if (ud.Username != username)
+                // om UserName inte är null så blir ud.UserName username
+                ud.Username = username ?? string.Empty; // om ud.Username är null ta höger (bli tom sträng)
+        }
+        else
+        {
+            // anv fanns ej skapa ny post 
+            // users[userId] stoppar samman objekt i dict:en
+            // både ud och users[userId] pekar på samma UserData, med Xp = 1
+            users[userId] = ud = new UserData { Username = username ?? string.Empty, Xp = 2 };
+        }
+
+        // EFTER: räkna ny level
+        int currXp = ud.Xp; //  kopierar nuvarande XP (värdetyp) till currXp
+        int currLvl = LevelSystem.countLvl(currXp); // beräknar ny lvl baserat på ny xp
+
+        // Skriv bara när level ökat
+        if (currLvl > prevLvl)
+        {
+            await message.Channel.SendMessageAsync($"{username} har nått level {currLvl}! 🎉");
+            SaveData();
+        }
+
+        Console.WriteLine($"{username} xp {prevXp}->{currXp}, lvl {prevLvl}->{currLvl}");
+
+
+
     }
+
+
 }
+
+
 
 
 
