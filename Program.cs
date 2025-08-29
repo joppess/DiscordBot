@@ -11,6 +11,8 @@ using System.Net.Http;
 using System.Net.Http.Json;
 using System.ComponentModel.Design.Serialization;
 using System.Globalization;
+using Discord.Net;
+using System.Linq;
 internal class Program
 {
     static async Task Main(string[] args)
@@ -146,10 +148,14 @@ public class UserRow
     // Task är en klass som representerar ett pågående arbete eller nåt som kommer hända.
     public async Task MessageReceivedAsync(SocketMessage message) // parametern handlar om allt om meddelandet som skickades(text, avsändarem, kanal)
     {
-        if (message.Author.IsBot) return; // ge ej xp till andra bottar
-        if (message is not SocketUserMessage m) return; // Om message inte är en SocketUserMessage → return
-        if (m.Source != MessageSource.User) return; // säkerställer att medd är från en anv..
-        if (m.Channel is not Discord.WebSocket.SocketTextChannel) return; // låt bara medd i serverns textnakaler gå vidare
+        if (message.Author.IsBot) // ge ej xp till andra bottar
+            return;
+        if (message is not SocketUserMessage m) // Om message inte är en SocketUserMessage → return
+            return;
+        if (m.Source != MessageSource.User) // säkerställer att medd är från en anv..
+            return;
+        if (m.Channel is not Discord.WebSocket.SocketTextChannel) // låt bara medd i serverns textnakaler gå vidare
+            return;
 
         if (m.Content.StartsWith("!weather", StringComparison.OrdinalIgnoreCase))
         {
@@ -511,7 +517,8 @@ public class UserRow
         "🧪 **!test** = testa så jag är här\n" +
         "🌦️ **!weather** = kolla vädret\n" +
         "🌦️🏙️ **!weather + stad** = kolla vädret för just den staden\n" +
-        "🏓 **!ping** = pong (och vice varsa)");
+        "🏓 **!ping** = pong (och vice varsa)\n" +
+        "🧹 **!clear** = tar bort skriven text i kanalen (testa clear + nummer fö mer)");
             return;
         }
 
@@ -525,6 +532,78 @@ public class UserRow
             await m.Channel.SendMessageAsync("Ping! 🏓");
             return;
 
+        }
+
+        if (m.Content.StartsWith("!clear", StringComparison.OrdinalIgnoreCase))
+        {
+            if (m.Channel is not SocketTextChannel channel)
+            {
+                return;
+            }
+            var parts = m.Content.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+
+            if (parts.Length < 2 || !int.TryParse(parts[1], out var count) || count <= 0)
+            {
+                await m.Channel.SendMessageAsync("Använd: `!clear <antal>` (t.ex. `!clear 4`).");
+                return;
+            }
+            // begränsa max antal delete med 50
+            const int MaxClear = 50;
+            count = Math.Min(count, MaxClear);
+            //kolla permissions
+            if (m.Author is not SocketGuildUser user)
+            {
+                await m.Channel.SendMessageAsync("Det här kommandot funkar bara på servrar."); // alltså ej i DM
+                return;
+            }
+            var bot = channel.Guild.CurrentUser; // channel.Guild = servern där kanalen finns // CurrentUser = bottens egen användare i serven
+            var userPerms = user.GetPermissions(channel);
+            var botPerms = bot.GetPermissions(channel);
+
+            if (!userPerms.ManageMessages)
+            {
+                await m.Channel.SendMessageAsync("Du behöver högre behörighet för att använda `!clear`.");
+                System.Console.WriteLine($"{user} behöver Manage Messages för att använda !clear ");
+                return;
+            }
+            if (!botPerms.ManageMessages || !botPerms.ReadMessageHistory)
+            {
+                await m.Channel.SendMessageAsync("Jag saknar behörighet för meddelanden och/eller **Read Message History** i den här kanalen.");
+                System.Console.WriteLine($" bott saknar **Manage Messages** och/eller **Read Message History** i den här kanalen.");
+                return;
+            }
+            try
+            {
+                // för att även ta bort själva kommandot
+                var fetched = await channel.GetMessagesAsync(limit: count + 1).FlattenAsync();
+                var now = DateTimeOffset.UtcNow;
+                var younger = fetched.Where(msg => (now - msg.Timestamp) < TimeSpan.FromDays(14)).ToList();
+                var older = fetched.Where(msg => (now - msg.Timestamp) >= TimeSpan.FromDays(14)).ToList();
+
+                int deleted = 0;
+
+                if (younger.Count > 0)
+                {
+                    await channel.DeleteMessagesAsync(younger);
+                    deleted += younger.Count;
+                }
+                // äldre medd tas bort ett och ett (DC-krav)
+                foreach (var msg in older)
+                {
+                    await msg.DeleteAsync();
+                    deleted++;
+                }
+                int shown = Math.Max(0, deleted - 1);
+                var confirm = await m.Channel.SendMessageAsync($"🧹 Rensade {shown} meddelanden.");
+                await Task.Delay(7500);
+                await confirm.DeleteAsync();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[CLEAR] Error: {ex.Message}");
+                await m.Channel.SendMessageAsync("Kunde inte rensa meddelanden just nu 😬");
+            }
+            return;
         }
 
         // message.Author = avsändaren av meddelandet
